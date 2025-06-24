@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"database/sql"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,34 +11,20 @@ import (
 	"time"
 
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/config"
+	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/storage/mysql"
 )
 
 func main() {
 	// load config
 	cfg := config.MustLoad()
 
-	// Initialize database connection
-	dsn := cfg.DatabaseURL()
-	db, err := sql.Open("mysql", dsn)
+	// db setup
+	_, err := mysql.New(cfg)
 	if err != nil {
-		slog.Error("Failed to connect to database", slog.String("error", err.Error()))
-		return
+		log.Fatal(err)
 	}
-
-	// Test the connection
-	err = db.Ping()
-	if err != nil {
-		slog.Error("Failed to ping database", slog.String("error", err.Error()))
-		return
-	}
-
-	// Configure connection pool
-	db.SetMaxIdleConns(cfg.Database.MaxIdleConns)
-	db.SetMaxOpenConns(cfg.Database.MaxOpenConns)
-	db.SetConnMaxLifetime(time.Duration(cfg.Database.ConnMaxLifetime) * time.Second)
 
 	slog.Info("Storage initialized", slog.String("env", cfg.Env), slog.String("version", "1.0.0"))
-	defer db.Close()
 	// setup router
 	router := http.NewServeMux()
 

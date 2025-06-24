@@ -1,14 +1,10 @@
 env: "dev"
 database:
-  host: 127.0.0.1
-  port: 4000
+  host: localhost
+  port: 3307
   user: root
-  password: ""
+  password: "root"
   name: order_matching
-  charset: "utf8mb4"
-  collation: "utf8mb4_general_ci"
-  max_idle_conns: 4
-  max_open_conns: 16
   conn_max_lifetime: 3600
 http_server:
   address: "localhost:8082"
