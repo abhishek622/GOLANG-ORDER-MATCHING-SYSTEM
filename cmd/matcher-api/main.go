@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/config"
+	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/engine"
+	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/http/handlers/order"
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/storage/mysql"
 )
 
@@ -19,14 +21,21 @@ func main() {
 	cfg := config.MustLoad()
 
 	// db setup
-	_, err := mysql.New(cfg)
+	storage, err := mysql.New(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	slog.Info("Storage initialized", slog.String("env", cfg.Env), slog.String("version", "1.0.0"))
-	// setup router
+	// setup engine and router
+	engine := engine.NewMatchingEngine(storage)
 	router := http.NewServeMux()
+
+	router.HandleFunc("POST /api/orders", order.PlaceOrder(engine))
+	router.HandleFunc("GET /api/orders/{id}", order.GetOrderStatus(engine))
+	router.HandleFunc("DELETE /api/orders/{id}", order.CancelOrder(engine))
+	router.HandleFunc("GET /api/orderbook", order.GetOrderBook(engine))
+	router.HandleFunc("GET /api/trades", trade.ListTrades(engine))
 
 	// setup server
 	server := http.Server{
