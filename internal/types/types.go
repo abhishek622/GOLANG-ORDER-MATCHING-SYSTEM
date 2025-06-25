@@ -25,11 +25,11 @@ const (
 
 type Order struct {
 	OrderID   string      `json:"order_id"`
-	Symbol    string      `json:"symbol"`
-	Side      OrderSide   `json:"side"`
-	OrderType OrderType   `json:"type"`
-	Price     *float64    `json:"price,omitempty"`
-	Quantity  int64       `json:"quantity"`
+	Symbol    string      `json:"symbol" validate:"required"`
+	Side      OrderSide   `json:"side" validate:"required, eq=buy|eq=sell"`
+	OrderType OrderType   `json:"type" validate:"required, eq=limit|eq=market"`
+	Price     *float64    `json:"price,omitempty"  validate:"required_if=Type eq=limit,gt=0"`
+	Quantity  int64       `json:"quantity" validate:"required,gt=0"`
 	Remaining int64       `json:"remaining"`
 	Status    OrderStatus `json:"status"`
 	CreatedAt time.Time   `json:"created_at"`
@@ -49,12 +49,11 @@ type Trade struct {
 
 type PlaceOrderRequest struct {
 	Symbol   string    `json:"symbol" validate:"required"`
-	Side     OrderSide `json:"side" validate:"required, eq=buy|eq=sell"`
-	Type     OrderType `json:"type" validate:"required, eq=limit|eq=market"`
+	Side     OrderSide `json:"side" validate:"required,eq=buy|eq=sell"`
+	Type     OrderType `json:"type" validate:"required,eq=limit|eq=market"`
 	Price    *float64  `json:"price,omitempty" validate:"required_if=Type eq=limit,gt=0"`
 	Quantity int64     `json:"quantity" validate:"required,gt=0"`
 }
-
 type OrderLevel struct {
 	Price    float64 `json:"price"`
 	Quantity int64   `json:"quantity"`

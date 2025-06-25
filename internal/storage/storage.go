@@ -1,5 +1,12 @@
 package storage
 
+import "github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/types"
+
 type Storage interface {
-	PlaceOrder(symbol string, side string, order_type string, price float64, initial_quantity int, remaining_quantity int) (string, error)
+	PlaceOrder(order types.Order) (int64, error)
+	MarkOrderFilled(order_id int64) error
+	MarkOrderCancelled(order_id int64) error
+	CreateTrade(trade types.Trade) (int64, error)
+	ListTrades(symbol string) ([]types.Trade, error)
+	GetOrderStatus(order_id int64) (*types.Order, error)
 }

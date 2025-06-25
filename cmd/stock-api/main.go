@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/config"
-	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/engine"
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/http/handlers/order"
+	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/http/handlers/trade"
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/storage/mysql"
 )
 
@@ -27,15 +27,18 @@ func main() {
 	}
 
 	slog.Info("Storage initialized", slog.String("env", cfg.Env), slog.String("version", "1.0.0"))
-	// setup engine and router
-	engine := engine.NewMatchingEngine(storage)
+
+	// setup router
 	router := http.NewServeMux()
 
-	router.HandleFunc("POST /api/orders", order.PlaceOrder(engine))
-	router.HandleFunc("GET /api/orders/{id}", order.GetOrderStatus(engine))
-	router.HandleFunc("DELETE /api/orders/{id}", order.CancelOrder(engine))
-	router.HandleFunc("GET /api/orderbook", order.GetOrderBook(engine))
-	router.HandleFunc("GET /api/trades", trade.ListTrades(engine))
+	orderHandler := order.NewOrderHandler(storage)
+	tradeHandler := trade.ListTrades(storage)
+
+	router.HandleFunc("POST /api/orders", orderHandler.PlaceOrder)
+	router.HandleFunc("GET /api/orders/{orderId}", orderHandler.GetOrderStatus)
+	router.HandleFunc("DELETE /api/orders/{orderId}", orderHandler.CancelOrder)
+	router.HandleFunc("GET /api/orderbook", orderHandler.GetOrderBook)
+	router.HandleFunc("GET /api/trades", tradeHandler)
 
 	// setup server
 	server := http.Server{
@@ -47,7 +50,7 @@ func main() {
 
 	// Graceful shutdown of server
 	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGTTIN, syscall.SIGTERM)
+	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		err := server.ListenAndServe()
 		if err != nil {
