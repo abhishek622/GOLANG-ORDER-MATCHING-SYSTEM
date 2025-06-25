@@ -46,7 +46,7 @@ func main() {
 		Handler: router,
 	}
 
-	slog.Info("Server started 🚀", slog.String("address", cfg.Addr))
+	slog.Info("Server started ", slog.String("address", cfg.Addr))
 
 	// Graceful shutdown of server
 	done := make(chan os.Signal, 1)
@@ -64,8 +64,14 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Shutdown server
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("Failed to shutdown server", slog.String("error", err.Error()))
+	}
+
+	// Close database connection
+	if err := storage.DB.Close(); err != nil {
+		slog.Error("Failed to close database connection", slog.String("error", err.Error()))
 	}
 
 	slog.Info("Server shutdown successfully")

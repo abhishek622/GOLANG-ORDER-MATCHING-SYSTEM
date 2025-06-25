@@ -24,7 +24,7 @@ const (
 )
 
 type Order struct {
-	OrderID   string      `json:"order_id"`
+	OrderID   int64       `json:"order_id"`
 	Symbol    string      `json:"symbol" validate:"required"`
 	Side      OrderSide   `json:"side" validate:"required, eq=buy|eq=sell"`
 	OrderType OrderType   `json:"type" validate:"required, eq=limit|eq=market"`
@@ -37,10 +37,10 @@ type Order struct {
 }
 
 type Trade struct {
-	TradeID     string    `json:"trade_id"`
+	TradeID     int64     `json:"trade_id"`
 	Symbol      string    `json:"symbol"`
-	BuyOrderID  string    `json:"buy_order_id"`
-	SellOrderID string    `json:"sell_order_id"`
+	BuyOrderID  int64     `json:"buy_order_id"`
+	SellOrderID int64     `json:"sell_order_id"`
 	Quantity    int64     `json:"quantity"`
 	Price       float64   `json:"price"`
 	CreatedAt   time.Time `json:"created_at"`

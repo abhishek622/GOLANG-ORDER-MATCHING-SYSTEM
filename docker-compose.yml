@@ -1,15 +1,4 @@
 services:
-  tidb:
-    image: pingcap/tidb:latest
-    container_name: tidb
-    ports:
-      - "3307:4000" # map TiDB port 4000 to host 3307 as in your local.yaml
-    command: ["--store=tikv", "--path=127.0.0.1:2379"]
-    depends_on:
-      - pd
-    networks:
-      - tidb-net
-
   pd:
     image: pingcap/pd:latest
     container_name: pd
@@ -35,6 +24,20 @@ services:
       - --data-dir=/data/tikv
     ports:
       - "20160:20160"
+    networks:
+      - tidb-net
+
+  tidb:
+    image: pingcap/tidb:latest
+    container_name: tidb
+    depends_on:
+      - pd
+      - tikv
+    command:
+      - --store=tikv
+      - --path=pd:2379
+    ports:
+      - "4000:4000" # 👈 Match your config.yaml (port: 4000)
     networks:
       - tidb-net
 

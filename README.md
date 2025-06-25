@@ -71,7 +71,7 @@ curl http://localhost:8082/api/orders/{orderId}
 #### Get Order Book
 
 ```bash
-curl http://localhost:8082/api/orderbook/{symbol}
+curl http://localhost:8082/api/orderbook?symbol={symbol}
 ```
 
 ## Design Decisions

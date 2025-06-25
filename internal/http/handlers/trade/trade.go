@@ -29,6 +29,6 @@ func ListTrades(storage storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		response.WriteJson(w, http.StatusOK, map[string]interface{}{"message": "Trades fetched successfully", "trades": trades})
+		response.WriteJson(w, http.StatusOK, map[string]interface{}{"message": "Trades fetched successfully", "data": trades})
 	}
 }

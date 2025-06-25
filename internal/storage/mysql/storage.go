@@ -21,7 +21,6 @@ func New(cfg *config.Config) (*Mysql, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
-	defer db.Close()
 
 	// close idle connections after 1 minutes
 	db.SetConnMaxLifetime(time.Duration(cfg.Database.ConnMaxLifetime) * time.Second)
@@ -34,18 +33,16 @@ func New(cfg *config.Config) (*Mysql, error) {
 	// --- creating initial tables ---
 	_, err = db.Exec(
 		`CREATE TABLE IF NOT EXISTS orders (
-            order_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-            symbol VARCHAR(10) NOT NULL,
+            order_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+            symbol VARCHAR(20) NOT NULL,
             side ENUM('buy', 'sell') NOT NULL,
             type ENUM('limit', 'market') NOT NULL,
-            price DECIMAL(10, 2) NULL,
-            quantity INT,
-            remaining INT,
-            status ENUM('open', 'filled', 'partial', 'cancelled') NOT NULL,
+            price DECIMAL(10, 2),
+            quantity BIGINT NOT NULL,
+            remaining BIGINT NOT NULL,
+            status ENUM('open', 'filled', 'cancelled', 'partial') NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            INDEX idx_symbol_side_price_created (symbol, side, price, created_at),
-            INDEX idx_status (status)
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )`,
 	)
 	if err != nil {
@@ -54,7 +51,7 @@ func New(cfg *config.Config) (*Mysql, error) {
 
 	_, err = db.Exec(
 		`CREATE TABLE IF NOT EXISTS trades (
-            trade_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            trade_id BIGINT PRIMARY KEY AUTO_INCREMENT,
             buy_order_id BIGINT NOT NULL,
             sell_order_id BIGINT NOT NULL,
 			price DECIMAL(10, 2) NOT NULL,
@@ -150,35 +147,53 @@ func (m *Mysql) CreateTrade(trade types.Trade) (int64, error) {
 }
 
 func (m *Mysql) ListTrades(symbol string) ([]types.Trade, error) {
-	stmt, err := m.DB.Prepare(`SELECT t.trade_id, t.buy_order_id, t.sell_order_id, t.price, t.quantity, t.created_at, t.updated_at 
-	FROM trades t JOIN orders o ON t.buy_order_id = o.order_id WHERE o.symbol = ?`)
-	if err != nil {
-		return nil, err
-	}
+	query := `SELECT t.trade_id, t.buy_order_id, t.sell_order_id, t.price, t.quantity, t.created_at, t.updated_at, o.symbol
+		FROM trades t 
+		JOIN orders o ON t.buy_order_id = o.order_id 
+		WHERE o.symbol = ?
+		ORDER BY t.created_at DESC
+	`
 
+	stmt, err := m.DB.Prepare(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare query: %w", err)
+	}
 	defer stmt.Close()
 
 	rows, err := stmt.Query(symbol)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
-
 	defer rows.Close()
 
 	var trades []types.Trade
 	for rows.Next() {
 		var trade types.Trade
-		if err := rows.Scan(&trade.TradeID, &trade.BuyOrderID, &trade.SellOrderID, &trade.Price, &trade.Quantity, &trade.CreatedAt, &trade.UpdatedAt); err != nil {
-			return nil, err
+		err := rows.Scan(
+			&trade.TradeID,
+			&trade.BuyOrderID,
+			&trade.SellOrderID,
+			&trade.Price,
+			&trade.Quantity,
+			&trade.CreatedAt,
+			&trade.UpdatedAt,
+			&trade.Symbol,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan trade row: %w", err)
 		}
 		trades = append(trades, trade)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating trade rows: %w", err)
 	}
 
 	return trades, nil
 }
 
 func (m *Mysql) GetOrderStatus(order_id int64) (*types.Order, error) {
-	stmt, err := m.DB.Prepare(`SELECT * FROM orders WHERE order_id = ?`)
+	stmt, err := m.DB.Prepare(`SELECT order_id, symbol, side, type, price, quantity, remaining, status, created_at, updated_at FROM orders WHERE order_id = ?`)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +201,20 @@ func (m *Mysql) GetOrderStatus(order_id int64) (*types.Order, error) {
 	defer stmt.Close()
 
 	var order types.Order
-	if err := stmt.QueryRow(order_id).Scan(&order); err != nil {
+	err = stmt.QueryRow(order_id).Scan(
+		&order.OrderID,
+		&order.Symbol,
+		&order.Side,
+		&order.OrderType,
+		&order.Price,
+		&order.Quantity,
+		&order.Remaining,
+		&order.Status,
+		&order.CreatedAt,
+		&order.UpdatedAt,
+	)
+
+	if err != nil {
 		return nil, err
 	}
 
