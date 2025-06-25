@@ -1,13 +1,43 @@
 services:
-  db:
-    image: mysql:latest
+  tidb:
+    image: pingcap/tidb:latest
+    container_name: tidb
     ports:
-      - "3307:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: order_matching
-    volumes:
-      - mysql_data:/var/lib/mysql
+      - "3307:4000" # map TiDB port 4000 to host 3307 as in your local.yaml
+    command: ["--store=tikv", "--path=127.0.0.1:2379"]
+    depends_on:
+      - pd
+    networks:
+      - tidb-net
 
-volumes:
-  mysql_data:
+  pd:
+    image: pingcap/pd:latest
+    container_name: pd
+    ports:
+      - "2379:2379"
+    command:
+      - --name=pd
+      - --client-urls=http://0.0.0.0:2379
+      - --peer-urls=http://0.0.0.0:2380
+      - --initial-cluster=pd=http://0.0.0.0:2380
+      - --data-dir=/data/pd
+    networks:
+      - tidb-net
+
+  tikv:
+    image: pingcap/tikv:latest
+    container_name: tikv
+    depends_on:
+      - pd
+    command:
+      - --addr=0.0.0.0:20160
+      - --pd=http://pd:2379
+      - --data-dir=/data/tikv
+    ports:
+      - "20160:20160"
+    networks:
+      - tidb-net
+
+networks:
+  tidb-net:
+    driver: bridge
