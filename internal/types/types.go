@@ -25,11 +25,11 @@ const (
 
 type Order struct {
 	OrderID   int64       `json:"order_id"`
-	Symbol    string      `json:"symbol" validate:"required"`
-	Side      OrderSide   `json:"side" validate:"required, eq=buy|eq=sell"`
-	OrderType OrderType   `json:"type" validate:"required, eq=limit|eq=market"`
-	Price     *float64    `json:"price,omitempty"  validate:"required_if=Type eq=limit,gt=0"`
-	Quantity  int64       `json:"quantity" validate:"required,gt=0"`
+	Symbol    string      `json:"symbol"`
+	Side      OrderSide   `json:"side"`
+	OrderType OrderType   `json:"type"`
+	Price     *int64      `json:"price,omitempty"`
+	Quantity  int64       `json:"quantity"`
 	Remaining int64       `json:"remaining"`
 	Status    OrderStatus `json:"status"`
 	CreatedAt time.Time   `json:"created_at"`
@@ -42,25 +42,26 @@ type Trade struct {
 	BuyOrderID  int64     `json:"buy_order_id"`
 	SellOrderID int64     `json:"sell_order_id"`
 	Quantity    int64     `json:"quantity"`
-	Price       float64   `json:"price"`
+	Price       int64     `json:"price"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type PlaceOrderRequest struct {
 	Symbol   string    `json:"symbol" validate:"required"`
-	Side     OrderSide `json:"side" validate:"required,eq=buy|eq=sell"`
-	Type     OrderType `json:"type" validate:"required,eq=limit|eq=market"`
-	Price    *float64  `json:"price,omitempty" validate:"required_if=Type eq=limit,gt=0"`
+	Side     OrderSide `json:"side" validate:"required,oneof=buy sell"`
+	Type     OrderType `json:"type" validate:"required,oneof=limit market"`
+	Price    *int64    `json:"price,omitempty" validate:"required_if=Type limit,omitempty,gt=0"`
 	Quantity int64     `json:"quantity" validate:"required,gt=0"`
 }
-type OrderLevel struct {
-	Price    float64 `json:"price"`
-	Quantity int64   `json:"quantity"`
-	Orders   int     `json:"orders"`
+
+type OrderBookPriceLevel struct {
+	Price    int64 `json:"price"`
+	Quantity int64 `json:"quantity"`
 }
-type OrderResponse struct {
-	Symbol string       `json:"symbol"`
-	Bids   []OrderLevel `json:"bids"`
-	Asks   []OrderLevel `json:"asks"`
+
+type OrderBookSnapshot struct {
+	Symbol string                `json:"symbol"`
+	Bids   []OrderBookPriceLevel `json:"bids"`
+	Asks   []OrderBookPriceLevel `json:"asks"`
 }

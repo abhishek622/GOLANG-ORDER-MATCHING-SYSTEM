@@ -37,7 +37,7 @@ func New(cfg *config.Config) (*Mysql, error) {
             symbol VARCHAR(20) NOT NULL,
             side ENUM('buy', 'sell') NOT NULL,
             type ENUM('limit', 'market') NOT NULL,
-            price DECIMAL(10, 2),
+            price INT,
             quantity BIGINT NOT NULL,
             remaining BIGINT NOT NULL,
             status ENUM('open', 'filled', 'cancelled', 'partial') NOT NULL,
@@ -54,7 +54,7 @@ func New(cfg *config.Config) (*Mysql, error) {
             trade_id BIGINT PRIMARY KEY AUTO_INCREMENT,
             buy_order_id BIGINT NOT NULL,
             sell_order_id BIGINT NOT NULL,
-			price DECIMAL(10, 2) NOT NULL,
+			price INT NOT NULL,
             quantity BIGINT NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -156,13 +156,13 @@ func (m *Mysql) ListTrades(symbol string) ([]types.Trade, error) {
 
 	stmt, err := m.DB.Prepare(query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to prepare query: %w", err)
+		return nil, err
 	}
 	defer stmt.Close()
 
 	rows, err := stmt.Query(symbol)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute query: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -180,20 +180,45 @@ func (m *Mysql) ListTrades(symbol string) ([]types.Trade, error) {
 			&trade.Symbol,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan trade row: %w", err)
+			return nil, err
 		}
 		trades = append(trades, trade)
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating trade rows: %w", err)
+		return nil, err
 	}
 
 	return trades, nil
 }
 
+func (m *Mysql) UpdateOrderStatus(orderID int64, status types.OrderStatus, remaining int64) error {
+	stmt, err := m.DB.Prepare(`UPDATE orders SET status = ?, remaining = ?, updated_at = NOW() WHERE order_id = ?`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	result, err := stmt.Exec(status, remaining, orderID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("order not found")
+	}
+
+	return nil
+}
+
 func (m *Mysql) GetOrderStatus(order_id int64) (*types.Order, error) {
-	stmt, err := m.DB.Prepare(`SELECT order_id, symbol, side, type, price, quantity, remaining, status, created_at, updated_at FROM orders WHERE order_id = ?`)
+	stmt, err := m.DB.Prepare(`SELECT order_id, symbol, side, type, price, quantity, remaining, status, created_at, updated_at 
+		FROM orders WHERE order_id = ?`)
 	if err != nil {
 		return nil, err
 	}
@@ -213,6 +238,10 @@ func (m *Mysql) GetOrderStatus(order_id int64) (*types.Order, error) {
 		&order.CreatedAt,
 		&order.UpdatedAt,
 	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("order not found")
+	}
 
 	if err != nil {
 		return nil, err

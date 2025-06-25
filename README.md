@@ -1,19 +1,19 @@
 # GOLANG-ORDER-MATCHING-SYSTEM
 
-An efficient Order Matching System built with Go and TiDB, designed to handle high-frequency trading operations.
+An efficient Order Matching System built with Go and TiDB.
 
 ## Features
 
 - Real-time order matching
-- Support for various order types (Market, Limit, Stop)
+- Support for order types (Market and Limit)
 - Order book management
 - Trade execution and reporting
 - RESTful API interface
 
 ## Prerequisites
 
-- Go 1.20 or higher
-- Docker and Docker Compose
+- Go 1.24 or higher
+- tiDB
 - Git
 
 ## Setup Instructions
@@ -21,22 +21,30 @@ An efficient Order Matching System built with Go and TiDB, designed to handle hi
 ### 1. Install Dependencies
 
 ```bash
-go mod download
+go mod tidy
 ```
 
 ### 2. Database Setup (Using Docker)
 
-1. Start the database containers:
+1. Start a local TiDB cluster:
 
 ```bash
-docker-compose up -d
+tiup playground
 ```
 
-The TiDB cluster will be available with:
+2. Using mysql CLI or GUI tools like DBeaver
 
-- PD (Placement Driver) at port 2379
-- TiKV (Distributed Key-Value Store) at port 20160
-- TiDB (MySQL-compatible Database) at port 3307
+3. Create the database
+
+```bash
+CREATE DATABASE IF NOT EXISTS order_matching;
+```
+
+4. Use the database
+
+```bash
+USE order_matching;
+```
 
 ### 3. Run the Application
 
@@ -48,30 +56,91 @@ The application will be available at http://localhost:8082
 
 ### 4. API Documentation
 
-#### Submit New Order
+### Process Limit Order
 
 ```bash
+# 1. Place a sell limit order
 curl -X POST http://localhost:8082/api/orders \
   -H "Content-Type: application/json" \
-  -d '{
-    "symbol": "AAPL",
-    "side": "BUY",
-    "type": "LIMIT",
-    "quantity": 100,
-    "price": 150.00
-  }'
+  -d '{"symbol":"BTC-USD","side":"sell","type":"limit","price":55,"quantity":100}'
+
+# 2. Place a buy limit order (first)
+curl -X POST http://localhost:8082/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"BTC-USD","side":"buy","type":"limit","price":120,"quantity":7}'
+
+# 3. Place another buy limit order (second)
+curl -X POST http://localhost:8082/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"BTC-USD","side":"buy","type":"limit","price":120,"quantity":3}'
 ```
 
-#### Get Order Status
+### 📊 Limit Order Execution
+
+| Side | Price | Quantity | Matches      | Orders Filled    | Partial Left           | Quantity Left |
+| ---- | ----- | -------- | ------------ | ---------------- | ---------------------- | ------------- |
+| Sell | 55    | 100      | None         | None             | Added to asks at 55    | 100           |
+| Buy  | 120   | 7        | 100@1, 110@5 | 2 orders matched | Buy 120@1 (1 unit)     | 1             |
+| Buy  | 120   | 3        | 100@1, 110@2 | 2 orders matched | Sell 110@3 (remaining) | 0             |
+
+### Process Market Order
 
 ```bash
-curl http://localhost:8082/api/orders/{orderId}
+# 1. Place a sell market order
+curl -X POST http://localhost:8082/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"AAPL","side":"sell","type":"market","quantity":6}'
+
+# 2. Place a buy market order
+curl -X POST http://localhost:8082/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"AAPL","side":"buy","type":"market","quantity":10}'
 ```
 
-#### Get Order Book
+### 📈 Market Order Execution
+
+| Side | Quantity | Matches      | Orders Filled    | Partial Left    | Quantity Left |
+| ---- | -------- | ------------ | ---------------- | --------------- | ------------- |
+| Sell | 6        | 90@5, 80@1   | 2 orders matched | 80@1 (bid side) | 0             |
+| Buy  | 10       | 100@1, 110@5 | 2 orders matched | none            | 4 (unfilled)  |
+
+### Cancel Order
 
 ```bash
-curl http://localhost:8082/api/orderbook?symbol={symbol}
+# 1. Place a market order
+curl -s -X POST http://localhost:8082/api/orders \
+  -H "Content-Type: application/json" \
+  -d {"symbol":"BTC-USD","side":"sell","type":"market","quantity":100}
+
+# Replace {order_id} with actual order ID
+curl -X DELETE http://localhost:8082/api/orders/{order_id}
+```
+
+### ❌ Cancel Order Behavior
+
+| Side | Original Price | Original Quantity | Effect on Book         |
+| ---- | -------------- | ----------------- | ---------------------- |
+| Sell | 100            | 1                 | Removed from asks list |
+
+### Get Order Status
+
+```bash
+# Get status of a specific order
+curl -X GET http://localhost:8082/api/orders/{order_id}
+```
+
+### Get Order Book
+
+```bash
+# Get current order book for a symbol
+curl -X GET "http://localhost:8082/api/orderbook?symbol=BTC-USD"
+```
+
+### Get Trades
+
+```bash
+# Get all trades for a symbol
+curl -X GET "http://localhost:8082/api/trades?symbol=BTC-USD"
 ```
 
 ## Design Decisions
@@ -94,24 +163,3 @@ curl http://localhost:8082/api/orderbook?symbol={symbol}
 2. Orders are processed in FIFO order
 3. Market orders are matched immediately
 4. Limit orders wait for matching price
-5. Stop orders trigger when price condition is met
-
-## Maintenance
-
-### Restart Application
-
-```bash
-docker-compose restart
-```
-
-### Reset Database
-
-```bash
-docker-compose down -v
-```
-
-### View Logs
-
-```bash
-docker-compose logs -f
-```
