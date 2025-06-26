@@ -1,0 +1,145 @@
+{
+	"info": {
+		"_postman_id": "619e40a5-7848-4dca-95f0-5759da25dfcd",
+		"name": "Order matching system",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "23320652"
+	},
+	"item": [
+		{
+			"name": "Create Orders",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "// limit sell\n// {\"symbol\":\"BTC-USD\",\"side\":\"sell\",\"type\":\"limit\",\"price\":55,\"quantity\":20}\n\n// limit buy\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"limit\",\"price\":120,\"quantity\":7}\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"limit\",\"price\":120,\"quantity\":3}\n\n// market buy\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"market\",\"quantity\":10}\n\n// limit buy\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"limit\",\"price\":120,\"quantity\":7}\n// market sell\n// {\"symbol\":\"BTC-USD\",\"side\":\"sell\",\"type\":\"market\",\"quantity\":6}\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:8082/api/orders",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8082",
+					"path": [
+						"api",
+						"orders"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Orders Status",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8082/api/orders/:orderId",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8082",
+					"path": [
+						"api",
+						"orders",
+						":orderId"
+					],
+					"variable": [
+						{
+							"key": "orderId",
+							"value": "5"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Delete Order",
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8082/api/orders/:orderId",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8082",
+					"path": [
+						"api",
+						"orders",
+						":orderId"
+					],
+					"variable": [
+						{
+							"key": "orderId",
+							"value": "5"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get OrderBook",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8082/api/orderbook?symbol=BTC-USD",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8082",
+					"path": [
+						"api",
+						"orderbook"
+					],
+					"query": [
+						{
+							"key": "symbol",
+							"value": "BTC-USD"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Trades",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8082/api/trades?symbol=BTC-USD",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8082",
+					"path": [
+						"api",
+						"trades"
+					],
+					"query": [
+						{
+							"key": "symbol",
+							"value": "BTC-USD"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}

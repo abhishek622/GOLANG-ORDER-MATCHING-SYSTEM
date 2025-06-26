@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
@@ -12,10 +13,30 @@ type HTTPServer struct {
 	Addr string `yaml:"address" env-required:"true"`
 }
 
+type Database struct {
+	Host            string `yaml:"host" env-required:"true"`
+	Port            int    `yaml:"port" env-required:"true"`
+	User            string `yaml:"user" env-required:"true"`
+	Password        string `yaml:"password"`
+	Name            string `yaml:"name" env-required:"true"`
+	ConnMaxLifetime int    `yaml:"conn_max_lifetime" env-default:"3600"`
+}
+
 type Config struct {
-	Env         string `yaml:"env" env:"ENV" env-required:"true" env-default:"production"`
-	StoragePath string `yaml:"storage_path" env-required:"true"`
-	HTTPServer  `yaml:"http_server"`
+	Env        string   `yaml:"env" env:"ENV" env-required:"true" env-default:"production"`
+	Database   Database `yaml:"database" env-required:"true"`
+	HTTPServer `yaml:"http_server"`
+}
+
+func (c *Config) DatabaseURL() string {
+	return fmt.Sprintf(
+		"%s:%s@tcp(%s:%d)/%s?parseTime=true",
+		c.Database.User,
+		c.Database.Password,
+		c.Database.Host,
+		c.Database.Port,
+		c.Database.Name,
+	)
 }
 
 func MustLoad() *Config {
