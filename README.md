@@ -56,7 +56,9 @@ The application will be available at http://localhost:8082
 
 ### 4. API Documentation
 
-### Process Limit Order
+Note: _price @ quantity_
+
+### 📊 Limit Order Matching
 
 ```bash
 # 1. Place a sell limit order
@@ -75,52 +77,52 @@ curl -X POST http://localhost:8082/api/orders \
   -d '{"symbol":"BTC-USD","side":"buy","type":"limit","price":120,"quantity":3}'
 ```
 
-### 📊 Limit Order Execution
+| Side | Price | Quantity | Matches With | Filled | Remaining | Action                     |
+| ---- | ----- | -------- | ------------ | ------ | --------- | -------------------------- |
+| Sell | 55    | 20       | -            | 0      | 20        | Added to asks              |
+| Buy  | 120   | 7        | 55@20        | 7      | 0         | Filled against ask@55 → 13 |
+| Buy  | 120   | 3        | 55@13        | 3      | 0         | Filled against ask@55 → 10 |
 
-| Side | Price | Quantity | Matches      | Orders Filled    | Partial Left           | Quantity Left |
-| ---- | ----- | -------- | ------------ | ---------------- | ---------------------- | ------------- |
-| Sell | 55    | 100      | None         | None             | Added to asks at 55    | 100           |
-| Buy  | 120   | 7        | 100@1, 110@5 | 2 orders matched | Buy 120@1 (1 unit)     | 1             |
-| Buy  | 120   | 3        | 100@1, 110@2 | 2 orders matched | Sell 110@3 (remaining) | 0             |
-
-### Process Market Order
+### 📈 Market Order Matching
 
 ```bash
 # 1. Place a sell market order
 curl -X POST http://localhost:8082/api/orders \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"AAPL","side":"sell","type":"market","quantity":6}'
+  -d '{"symbol":"BTC-USD","side":"buy","type":"market","quantity":10}'
+
+curl -X POST http://localhost:8082/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"BTC-USD","side":"buy","type":"limit","price":120,"quantity":7}'
 
 # 2. Place a buy market order
 curl -X POST http://localhost:8082/api/orders \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"AAPL","side":"buy","type":"market","quantity":10}'
+  -d '{"symbol":"BTC-USD","side":"sell","type":"market","quantity":6}'
 ```
 
-### 📈 Market Order Execution
+### 🧾 Order Execution Summary
 
-| Side | Quantity | Matches      | Orders Filled    | Partial Left    | Quantity Left |
-| ---- | -------- | ------------ | ---------------- | --------------- | ------------- |
-| Sell | 6        | 90@5, 80@1   | 2 orders matched | 80@1 (bid side) | 0             |
-| Buy  | 10       | 100@1, 110@5 | 2 orders matched | none            | 4 (unfilled)  |
+| Side | Type   | Price | Quantity | Matches With | Filled | Unfilled | Action                            |
+| ---- | ------ | ----- | -------- | ------------ | ------ | -------- | --------------------------------- |
+| Buy  | Market | -     | 10       | 55@10        | 10     | 0        | Fully filled from asks            |
+| Buy  | Limit  | 120   | 7        | None         | 0      | 7        | Added to bids                     |
+| Sell | Market | -     | 6        | 120@7        | 6      | 0        | Filled from limit buy (1 remains) |
 
 ### Cancel Order
 
 ```bash
-# 1. Place a market order
-curl -s -X POST http://localhost:8082/api/orders \
-  -H "Content-Type: application/json" \
-  -d {"symbol":"BTC-USD","side":"sell","type":"market","quantity":100}
-
 # Replace {order_id} with actual order ID
 curl -X DELETE http://localhost:8082/api/orders/{order_id}
 ```
 
 ### ❌ Cancel Order Behavior
 
+_I have cancelled the last buy limit order_
+
 | Side | Original Price | Original Quantity | Effect on Book         |
 | ---- | -------------- | ----------------- | ---------------------- |
-| Sell | 100            | 1                 | Removed from asks list |
+| Buy  | 120            | 7                 | Removed from asks list |
 
 ### Get Order Status
 
@@ -156,6 +158,7 @@ curl -X GET "http://localhost:8082/api/trades?symbol=BTC-USD"
    - RESTful architecture
    - JSON-based communication
    - Error handling with descriptive messages
+   - logs are used for debugging and monitoring
 
 ## Assumptions
 
@@ -163,3 +166,4 @@ curl -X GET "http://localhost:8082/api/trades?symbol=BTC-USD"
 2. Orders are processed in FIFO order
 3. Market orders are matched immediately
 4. Limit orders wait for matching price
+5. For simplicity used price as int64

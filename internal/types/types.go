@@ -55,13 +55,13 @@ type PlaceOrderRequest struct {
 	Quantity int64     `json:"quantity" validate:"required,gt=0"`
 }
 
-type OrderBookPriceLevel struct {
+type OrderBookEntry struct {
 	Price    int64 `json:"price"`
 	Quantity int64 `json:"quantity"`
 }
 
 type OrderBookSnapshot struct {
-	Symbol string                `json:"symbol"`
-	Bids   []OrderBookPriceLevel `json:"bids"`
-	Asks   []OrderBookPriceLevel `json:"asks"`
+	Symbol string           `json:"symbol"`
+	Bids   []OrderBookEntry `json:"bids"`
+	Asks   []OrderBookEntry `json:"asks"`
 }

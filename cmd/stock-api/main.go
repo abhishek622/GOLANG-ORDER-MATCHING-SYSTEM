@@ -30,15 +30,15 @@ func main() {
 
 	// setup router
 	router := http.NewServeMux()
-
 	orderHandler := order.NewOrderHandler(storage)
-	tradeHandler := trade.ListTrades(storage)
 
 	router.HandleFunc("POST /api/orders", orderHandler.PlaceOrder)
 	router.HandleFunc("GET /api/orders/{orderId}", orderHandler.GetOrderStatus)
 	router.HandleFunc("DELETE /api/orders/{orderId}", orderHandler.CancelOrder)
 	router.HandleFunc("GET /api/orderbook", orderHandler.GetOrderBook)
-	router.HandleFunc("GET /api/trades", tradeHandler)
+
+	tradeHandler := trade.NewTradeHandler(storage)
+	router.HandleFunc("GET /api/trades", tradeHandler.ListTrades)
 
 	// setup server
 	server := http.Server{

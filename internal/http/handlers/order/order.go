@@ -9,11 +9,26 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 
+	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/storage"
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/types"
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/utils/response"
 	"github.com/go-playground/validator/v10"
 )
+
+type OrderHandler struct {
+	Storage    storage.Storage
+	OrderBooks map[string]*OrderBook
+	mu         sync.RWMutex
+}
+
+func NewOrderHandler(storage storage.Storage) *OrderHandler {
+	return &OrderHandler{
+		Storage:    storage,
+		OrderBooks: make(map[string]*OrderBook),
+	}
+}
 
 func (h *OrderHandler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 
@@ -91,11 +106,6 @@ func (h *OrderHandler) GetOrderStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		response.WriteJson(w, http.StatusMethodNotAllowed, response.GeneralErrorString("method not allowed"))
-		return
-	}
-
 	id := r.PathValue("orderId")
 	orderID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil || orderID <= 0 {
@@ -121,7 +131,6 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Remove from order book if it's still open
 	if order.Status == types.OPEN || order.Status == types.PARTIAL {
 		h.mu.Lock()
 		if book, exists := h.OrderBooks[order.Symbol]; exists {
@@ -156,7 +165,7 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 func (h *OrderHandler) GetOrderBook(w http.ResponseWriter, r *http.Request) {
 	symbol := r.URL.Query().Get("symbol")
 	if symbol == "" {
-		response.WriteJson(w, http.StatusBadRequest, response.GeneralErrorString("symbol query parameter is required"))
+		response.WriteJson(w, http.StatusBadRequest, response.GeneralErrorString("symbol is required"))
 		return
 	}
 
@@ -166,8 +175,8 @@ func (h *OrderHandler) GetOrderBook(w http.ResponseWriter, r *http.Request) {
 
 	snapshot := types.OrderBookSnapshot{
 		Symbol: symbol,
-		Bids:   []types.OrderBookPriceLevel{},
-		Asks:   []types.OrderBookPriceLevel{},
+		Bids:   []types.OrderBookEntry{},
+		Asks:   []types.OrderBookEntry{},
 	}
 
 	if !exists {
@@ -178,7 +187,6 @@ func (h *OrderHandler) GetOrderBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the raw order book data
 	book.mu.RLock()
 	defer book.mu.RUnlock()
 
@@ -190,9 +198,8 @@ func (h *OrderHandler) GetOrderBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Convert bid levels to price levels
 	for price, quantity := range bidLevels {
-		snapshot.Bids = append(snapshot.Bids, types.OrderBookPriceLevel{
+		snapshot.Bids = append(snapshot.Bids, types.OrderBookEntry{
 			Price:    price,
 			Quantity: quantity,
 		})
@@ -206,20 +213,19 @@ func (h *OrderHandler) GetOrderBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Convert ask levels to price levels
 	for price, quantity := range askLevels {
-		snapshot.Asks = append(snapshot.Asks, types.OrderBookPriceLevel{
+		snapshot.Asks = append(snapshot.Asks, types.OrderBookEntry{
 			Price:    price,
 			Quantity: quantity,
 		})
 	}
 
-	// Sort bids in descending order (highest bid first)
+	// Sort bids, highest bid first
 	sort.Slice(snapshot.Bids, func(i, j int) bool {
 		return snapshot.Bids[i].Price > snapshot.Bids[j].Price
 	})
 
-	// Sort asks in ascending order (lowest ask first)
+	// Sort asks, lowest ask first
 	sort.Slice(snapshot.Asks, func(i, j int) bool {
 		return snapshot.Asks[i].Price < snapshot.Asks[j].Price
 	})
