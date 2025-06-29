@@ -1,285 +1,183 @@
 package order
 
 import (
+	"fmt"
 	"log/slog"
-	"sort"
-	"sync"
 	"time"
 
+	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/storage"
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/types"
 )
 
-type OrderBook struct {
-	Bids []*types.Order
-	Asks []*types.Order
-	mu   sync.RWMutex
-}
+// processOrder and returns the executed trades
+func (h *OrderHandler) processOrder(tx storage.Tx, newOrder *types.Order) ([]types.Trade, error) {
+	var trades []types.Trade
 
-// new order book
-func NewOrderBook() *OrderBook {
-	return &OrderBook{
-		Bids: []*types.Order{},
-		Asks: []*types.Order{},
-	}
-}
-
-func (ob *OrderBook) AddOrder(order *types.Order) {
-	ob.mu.Lock()
-	defer ob.mu.Unlock()
-
-	if order.CreatedAt.IsZero() {
-		order.CreatedAt = time.Now()
+	// determine opposite side for matching
+	oppositeSide := types.SELL
+	if newOrder.Side == types.SELL {
+		oppositeSide = types.BUY
 	}
 
-	order.Remaining = order.Quantity
-
-	if order.Side == types.BUY {
-		ob.Bids = append(ob.Bids, order)
-		// sort bids by price (highest first) and then by time (earliest first)
-		sort.SliceStable(ob.Bids, func(i, j int) bool {
-			// handle nil prices
-			if ob.Bids[i].Price == nil || ob.Bids[j].Price == nil {
-				return false
-			}
-			// if prices are equal, sort by time
-			if *ob.Bids[i].Price == *ob.Bids[j].Price {
-				return ob.Bids[i].CreatedAt.Before(ob.Bids[j].CreatedAt)
-			}
-			// higher price first
-			return *ob.Bids[i].Price > *ob.Bids[j].Price
-		})
-
-	} else {
-		ob.Asks = append(ob.Asks, order)
-		// sort asks by price (lowest first) and then by time (earliest first)
-		sort.SliceStable(ob.Asks, func(i, j int) bool {
-			if ob.Asks[i].Price == nil || ob.Asks[j].Price == nil {
-				return false
-			}
-			// if prices are the same, sort by time
-			if *ob.Asks[i].Price == *ob.Asks[j].Price {
-				return ob.Asks[i].CreatedAt.Before(ob.Asks[j].CreatedAt)
-			}
-			// lower price first
-			return *ob.Asks[i].Price < *ob.Asks[j].Price
-		})
-
+	// get matching orders from opposite side
+	matchingOrders, err := h.Storage.GetMatchingOrders(newOrder.Symbol, &oppositeSide)
+	if err != nil {
+		slog.Error("Failed to get matching orders", "error", err)
+		return nil, fmt.Errorf("failed to get matching orders: %w", err)
 	}
-}
 
-func (ob *OrderBook) RemoveOrder(orderID int64) bool {
-	ob.mu.Lock()
-	defer ob.mu.Unlock()
+	// process matching
+	for _, matchingOrder := range matchingOrders {
+		// check if orders can match based on price
+		if !h.canMatch(newOrder, matchingOrder) {
+			// for limit orders, skip to next order if not matched
+			// for market orders, will match with any opposite side order
+			if newOrder.OrderType == types.LIMIT {
+				continue
+			}
+		}
 
-	for i, order := range ob.Bids {
-		if order.OrderID == orderID {
-			ob.Bids = append(ob.Bids[:i], ob.Bids[i+1:]...)
-			return true
+		// calculate trade, minimum of remaining quantities
+		tradeQuantity := min(newOrder.Remaining, matchingOrder.Remaining)
+		if tradeQuantity <= 0 {
+			continue
+		}
+
+		// determine trade price
+		var tradePrice int64
+		if newOrder.OrderType == types.MARKET {
+			// market orders always execute at the counterparty's price
+			if matchingOrder.Price == nil {
+				slog.Error("Matching order has no price", "orderID", matchingOrder.OrderID)
+				continue
+			}
+			tradePrice = *matchingOrder.Price
+		} else if matchingOrder.OrderType == types.MARKET {
+			// if a limit order matching against a market order, use new order price
+			if newOrder.Price == nil {
+				slog.Error("New limit order has no price", "orderID", newOrder.OrderID)
+				continue
+			}
+			tradePrice = *newOrder.Price
+		} else {
+			// both are limit orders, use the existing order's price
+			if matchingOrder.Price == nil {
+				slog.Error("Matching limit order has no price", "orderID", matchingOrder.OrderID)
+				continue
+			}
+			tradePrice = *matchingOrder.Price
+		}
+
+		// create trade
+		trade := types.Trade{
+			Symbol:    newOrder.Symbol,
+			Price:     tradePrice,
+			Quantity:  tradeQuantity,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		if newOrder.Side == types.BUY {
+			trade.BuyOrderID = newOrder.OrderID
+			trade.SellOrderID = matchingOrder.OrderID
+		} else {
+			trade.BuyOrderID = matchingOrder.OrderID
+			trade.SellOrderID = newOrder.OrderID
+		}
+
+		_, err = h.Storage.CreateTrade(tx, trade)
+		if err != nil {
+			slog.Error("Failed to create trade", "error", err)
+			return nil, fmt.Errorf("failed to create trade: %w", err)
+		}
+
+		newOrder.Remaining -= tradeQuantity
+		matchingOrder.Remaining -= tradeQuantity
+
+		h.updateOrderStatus(newOrder)
+		h.updateOrderStatus(matchingOrder)
+
+		// update orders in db
+		if err := h.Storage.UpdateOrder(tx, newOrder.OrderID, newOrder.Remaining, newOrder.Status); err != nil {
+			slog.Error("Failed to update new order", "error", err)
+			return nil, fmt.Errorf("failed to update order %d: %w", newOrder.OrderID, err)
+		}
+
+		if err := h.Storage.UpdateOrder(tx, matchingOrder.OrderID, matchingOrder.Remaining, matchingOrder.Status); err != nil {
+			slog.Error("Failed to update matching order", "error", err)
+			return nil, fmt.Errorf("failed to update matching order %d: %w", matchingOrder.OrderID, err)
+		}
+
+		trades = append(trades, trade)
+
+		slog.Info("Trade executed",
+			"symbol", trade.Symbol,
+			"price", trade.Price,
+			"quantity", trade.Quantity,
+			"buy_order", trade.BuyOrderID,
+			"sell_order", trade.SellOrderID,
+			"new_order_type", newOrder.OrderType,
+			"matching_order_type", matchingOrder.OrderType)
+
+		// if new order is fully filled, break
+		if newOrder.Remaining <= 0 {
+			break
 		}
 	}
-	for i, order := range ob.Asks {
-		if order.OrderID == orderID {
-			ob.Asks = append(ob.Asks[:i], ob.Asks[i+1:]...)
-			return true
+
+	// for market orders that couldn't be fully filled, mark them as cancelled
+	if newOrder.OrderType == types.MARKET && newOrder.Remaining > 0 {
+		slog.Warn("Market order partially filled - remaining quantity will be cancelled",
+			"orderID", newOrder.OrderID,
+			"remaining", newOrder.Remaining,
+			"original", newOrder.Quantity)
+
+		newOrder.Status = types.CANCELLED
+		if err := h.Storage.UpdateOrder(tx, newOrder.OrderID, newOrder.Remaining, newOrder.Status); err != nil {
+			slog.Error("Failed to update market order status", "error", err)
+			return nil, fmt.Errorf("failed to update market order %d: %w", newOrder.OrderID, err)
 		}
 	}
+
+	return trades, nil
+}
+
+// check if two orders can be matched based on price
+func (h *OrderHandler) canMatch(newOrder *types.Order, existingOrder *types.Order) bool {
+	// Market orders can always match with limit orders
+	if newOrder.OrderType == types.MARKET && (existingOrder.OrderType == types.LIMIT || existingOrder.OrderType == types.MARKET) {
+		return true
+	}
+
+	// Both market orders can match
+	if newOrder.OrderType == types.MARKET && existingOrder.OrderType == types.MARKET {
+		return true
+	}
+
+	// For limit orders, compare prices
+	if newOrder.Price == nil || existingOrder.Price == nil {
+		return false
+	}
+
+	switch {
+	case newOrder.Side == types.BUY && existingOrder.Side == types.SELL:
+		// Buy order can match sell order if buy price >= sell price
+		return *newOrder.Price >= *existingOrder.Price
+	case newOrder.Side == types.SELL && existingOrder.Side == types.BUY:
+		// Sell order can match buy order if sell price <= buy price
+		return *newOrder.Price <= *existingOrder.Price
+	}
+
 	return false
 }
 
-func (ob *OrderBook) Match(order *types.Order, onTrade func(trade *types.Trade)) {
-	ob.mu.Lock()
-	defer ob.mu.Unlock()
-
-	if order.Side == types.BUY {
-		// match with lowest ask prices first
-		for len(ob.Asks) > 0 && order.Remaining > 0 {
-			bestAsk := ob.Asks[0]
-
-			// for limit orders, stop if the best ask is higher than our bid
-			if order.OrderType == types.LIMIT {
-				if order.Price != nil && bestAsk.Price != nil && *order.Price < *bestAsk.Price {
-					break
-				}
-			}
-
-			tradeQty := min(bestAsk.Remaining, order.Remaining)
-			// older order's has priority
-			var tradePrice int64
-			if bestAsk.Price != nil {
-				tradePrice = *bestAsk.Price
-			} else if order.Price != nil {
-				tradePrice = *order.Price
-			}
-
-			trade := &types.Trade{
-				Symbol:      order.Symbol,
-				BuyOrderID:  order.OrderID,
-				SellOrderID: bestAsk.OrderID,
-				Quantity:    tradeQty,
-				Price:       tradePrice,
-			}
-
-			onTrade(trade)
-
-			order.Remaining -= tradeQty
-			bestAsk.Remaining -= tradeQty
-
-			if bestAsk.Remaining == 0 {
-				ob.Asks = ob.Asks[1:]
-			}
-		}
-	} else {
-		// match with highest bid prices first
-		for len(ob.Bids) > 0 && order.Remaining > 0 {
-			bestBid := ob.Bids[0]
-
-			// for limit orders, stop if the best bid is lower than our ask
-			if order.OrderType == types.LIMIT {
-				if order.Price != nil && bestBid.Price != nil && *order.Price > *bestBid.Price {
-					break
-				}
-			}
-
-			tradeQty := min(bestBid.Remaining, order.Remaining)
-			var tradePrice int64
-			if bestBid.Price != nil {
-				tradePrice = *bestBid.Price
-			} else if order.Price != nil {
-				tradePrice = *order.Price
-			}
-
-			trade := &types.Trade{
-				Symbol:      order.Symbol,
-				BuyOrderID:  bestBid.OrderID,
-				SellOrderID: order.OrderID,
-				Quantity:    tradeQty,
-				Price:       tradePrice,
-			}
-
-			onTrade(trade)
-
-			order.Remaining -= tradeQty
-			bestBid.Remaining -= tradeQty
-
-			if bestBid.Remaining == 0 {
-				ob.Bids = ob.Bids[1:]
-			}
-		}
-	}
-}
-
-func (ob *OrderBook) GetSnapshot() map[string]interface{} {
-	ob.mu.RLock()
-	defer ob.mu.RUnlock()
-
-	bids := make([]types.OrderBookEntry, 0, len(ob.Bids))
-	for _, bid := range ob.Bids {
-		if bid.Price != nil {
-			bids = append(bids, types.OrderBookEntry{
-				Price:    *bid.Price,
-				Quantity: bid.Quantity,
-			})
-		}
-	}
-
-	asks := make([]types.OrderBookEntry, 0, len(ob.Asks))
-	for _, ask := range ob.Asks {
-		if ask.Price != nil {
-			asks = append(asks, types.OrderBookEntry{
-				Price:    *ask.Price,
-				Quantity: ask.Quantity,
-			})
-		}
-	}
-
-	return map[string]interface{}{
-		"bids": bids,
-		"asks": asks,
-	}
-}
-
-func (h *OrderHandler) getOrCreateOrderBook(symbol string) *OrderBook {
-	h.mu.RLock()
-	book, exists := h.OrderBooks[symbol]
-	h.mu.RUnlock()
-
-	if !exists {
-		h.mu.Lock()
-		// Check again in case another goroutine created it while we were waiting for the lock
-		book, exists = h.OrderBooks[symbol]
-		if !exists {
-			book = NewOrderBook()
-			h.OrderBooks[symbol] = book
-			slog.Info("Created new order book", "symbol", symbol)
-		}
-		h.mu.Unlock()
-	}
-
-	return book
-}
-
-func (h *OrderHandler) processOrder(order *types.Order) []*types.Trade {
-	book := h.getOrCreateOrderBook(order.Symbol)
-	var trades []*types.Trade
-
-	if order.CreatedAt.IsZero() {
-		order.CreatedAt = time.Now()
-	}
-
-	// for market orders match with the best available price
-	if order.OrderType == types.MARKET {
-		order.Price = nil
-	}
-
-	book.Match(order, func(trade *types.Trade) {
-		tradeID, err := h.Storage.CreateTrade(*trade)
-		if err != nil {
-			slog.Error("Failed to create trade", slog.String("error", err.Error()))
-			return
-		}
-		trade.TradeID = tradeID
-		trades = append(trades, trade)
-	})
-
-	// update order status based on remaining quantity
+func (h *OrderHandler) updateOrderStatus(order *types.Order) {
 	switch {
 	case order.Remaining == 0:
-		order.Status = types.FILLED // fully filled
-		if err := h.Storage.MarkOrderFilled(order.OrderID); err != nil {
-			slog.Error("Failed to mark order as filled", slog.String("error", err.Error()))
-		}
-
-	case order.OrderType == types.MARKET:
-		// for market orders, if there's remaining quantity, mark as partially filled
-		if order.Remaining > 0 {
-			if order.Remaining < order.Quantity {
-				order.Status = types.PARTIAL
-			} else {
-				order.Status = types.CANCELLED
-			}
-		}
-
-		switch order.Status {
-		case types.CANCELLED:
-			if err := h.Storage.MarkOrderCancelled(order.OrderID); err != nil {
-				slog.Error("Failed to update market order status", slog.String("error", err.Error()))
-			}
-		case types.PARTIAL:
-			if err := h.Storage.UpdateOrderStatus(order.OrderID, types.PARTIAL, order.Remaining); err != nil {
-				slog.Error("Failed to update market order status", slog.String("error", err.Error()))
-			}
-		}
-
-	case order.OrderType == types.LIMIT:
-		// limit order with remaining quantity goes to the book
-		if order.Remaining > 0 {
-			order.Status = types.OPEN
-			if order.Remaining < order.Quantity {
-				order.Status = types.PARTIAL
-			}
-			book.AddOrder(order)
-		}
+		order.Status = types.FILLED
+	case order.Remaining < order.Quantity:
+		order.Status = types.PARTIAL
+	default:
+		order.Status = types.OPEN
 	}
-
-	return trades
 }

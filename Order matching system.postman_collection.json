@@ -13,13 +13,33 @@
 				"header": [],
 				"body": {
 					"mode": "raw",
-					"raw": "// limit sell\n// {\"symbol\":\"BTC-USD\",\"side\":\"sell\",\"type\":\"limit\",\"price\":55,\"quantity\":20}\n\n// limit buy\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"limit\",\"price\":120,\"quantity\":7}\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"limit\",\"price\":120,\"quantity\":3}\n\n// market buy\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"market\",\"quantity\":10}\n\n// limit buy\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"limit\",\"price\":120,\"quantity\":7}\n// market sell\n// {\"symbol\":\"BTC-USD\",\"side\":\"sell\",\"type\":\"market\",\"quantity\":6}\n",
+					"raw": "// limit sell\n{\"symbol\":\"BTC-USD\",\"side\":\"sell\",\"type\":\"limit\",\"price\":55,\"quantity\":20}\n// {\"symbol\":\"BTC\",\"side\":\"sell\",\"type\":\"limit\",\"price\":55,\"quantity\":20}\n\n// limit buy\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"limit\",\"price\":120,\"quantity\":7}\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"limit\",\"price\":120,\"quantity\":3}\n\n// market buy\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"market\",\"quantity\":10}\n\n// limit buy\n// {\"symbol\":\"BTC-USD\",\"side\":\"buy\",\"type\":\"limit\",\"price\":70,\"quantity\":27}\n// market sell\n// {\"symbol\":\"BTC-USD\",\"side\":\"sell\",\"type\":\"market\",\"quantity\":20}\n",
 					"options": {
 						"raw": {
 							"language": "json"
 						}
 					}
 				},
+				"url": {
+					"raw": "http://localhost:8082/api/orders",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8082",
+					"path": [
+						"api",
+						"orders"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Orders",
+			"request": {
+				"method": "GET",
+				"header": [],
 				"url": {
 					"raw": "http://localhost:8082/api/orders",
 					"protocol": "http",
@@ -55,7 +75,7 @@
 					"variable": [
 						{
 							"key": "orderId",
-							"value": "5"
+							"value": "6"
 						}
 					]
 				}
@@ -82,7 +102,7 @@
 					"variable": [
 						{
 							"key": "orderId",
-							"value": "5"
+							"value": "6"
 						}
 					]
 				}

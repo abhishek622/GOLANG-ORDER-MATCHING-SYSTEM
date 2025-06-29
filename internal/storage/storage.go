@@ -2,12 +2,23 @@ package storage
 
 import "github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/types"
 
+// Tx represents a database transaction
+type Tx interface {
+	Commit() error
+	Rollback() error
+}
+
 type Storage interface {
-	PlaceOrder(order types.Order) (int64, error)
-	MarkOrderFilled(order_id int64) error
-	MarkOrderCancelled(order_id int64) error
-	UpdateOrderStatus(orderID int64, status types.OrderStatus, remaining int64) error
-	CreateTrade(trade types.Trade) (int64, error)
+	// Transaction management
+	Begin() (Tx, error)
+
+	PlaceOrder(tx Tx, order types.Order) (int64, error)
+	UpdateOrder(tx Tx, orderID int64, remaining int64, status types.OrderStatus) error
+	MarkOrderCancelled(tx Tx, orderID int64) error
+	GetOrderStatus(orderID int64) (*types.Order, error)
+	GetMatchingOrders(symbol string, side *types.OrderSide) ([]*types.Order, error)
+	GetAllOrders() ([]*types.Order, error)
+
+	CreateTrade(tx Tx, trade types.Trade) (int64, error)
 	ListTrades(symbol string) ([]types.Trade, error)
-	GetOrderStatus(order_id int64) (*types.Order, error)
 }

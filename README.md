@@ -4,7 +4,7 @@ An efficient Order Matching System built with Go and TiDB.
 
 ## Features
 
-- Real-time order matching
+- Order matching
 - Support for order types (Market and Limit)
 - Order book management
 - Trade execution and reporting
@@ -64,7 +64,7 @@ Note: _price @ quantity_
 # 1. Place a sell limit order
 curl -X POST http://localhost:8082/api/orders \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"BTC-USD","side":"sell","type":"limit","price":55,"quantity":100}'
+  -d '{"symbol":"BTC-USD","side":"sell","type":"limit","price":55,"quantity":20}'
 
 # 2. Place a buy limit order (first)
 curl -X POST http://localhost:8082/api/orders \
@@ -86,7 +86,7 @@ curl -X POST http://localhost:8082/api/orders \
 ### 📈 Market Order Matching
 
 ```bash
-# 1. Place a sell market order
+# 1. Place a buy market order
 curl -X POST http://localhost:8082/api/orders \
   -H "Content-Type: application/json" \
   -d '{"symbol":"BTC-USD","side":"buy","type":"market","quantity":10}'
@@ -95,7 +95,7 @@ curl -X POST http://localhost:8082/api/orders \
   -H "Content-Type: application/json" \
   -d '{"symbol":"BTC-USD","side":"buy","type":"limit","price":120,"quantity":7}'
 
-# 2. Place a buy market order
+# 2. Place a sell market order
 curl -X POST http://localhost:8082/api/orders \
   -H "Content-Type: application/json" \
   -d '{"symbol":"BTC-USD","side":"sell","type":"market","quantity":6}'
@@ -138,6 +138,13 @@ curl -X GET http://localhost:8082/api/orders/{order_id}
 curl -X GET "http://localhost:8082/api/orderbook?symbol=BTC-USD"
 ```
 
+### Get All active orders
+
+```bash
+# Get current order book for a symbol
+curl -X GET "http://localhost:8082/api/orders"
+```
+
 ### Get Trades
 
 ```bash
@@ -150,7 +157,7 @@ curl -X GET "http://localhost:8082/api/trades?symbol=BTC-USD"
 1. **Order Matching Engine**:
 
    - Implemented as a separate service
-   - Uses in-memory order book for performance
+   - Uses transactions for order consistency
    - Supports multiple order types
    - Implements FIFO matching algorithm
 

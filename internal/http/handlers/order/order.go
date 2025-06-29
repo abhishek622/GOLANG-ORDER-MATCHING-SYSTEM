@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"sync"
 
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/storage"
 	"github.com/abhishek622/GOLANG-ORDER-MATCHING-SYSTEM/internal/types"
@@ -18,20 +17,16 @@ import (
 )
 
 type OrderHandler struct {
-	Storage    storage.Storage
-	OrderBooks map[string]*OrderBook
-	mu         sync.RWMutex
+	Storage storage.Storage
 }
 
 func NewOrderHandler(storage storage.Storage) *OrderHandler {
 	return &OrderHandler{
-		Storage:    storage,
-		OrderBooks: make(map[string]*OrderBook),
+		Storage: storage,
 	}
 }
 
 func (h *OrderHandler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
-
 	var orderBody types.PlaceOrderRequest
 	err := json.NewDecoder(r.Body).Decode(&orderBody)
 	if errors.Is(err, io.EOF) {
@@ -49,6 +44,24 @@ func (h *OrderHandler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := h.Storage.Begin()
+	if err != nil {
+		slog.Error("Failed to begin transaction", "error", err)
+		response.WriteJson(w, http.StatusInternalServerError, response.GeneralErrorString("failed to start transaction"))
+		return
+	}
+
+	// defer rollback in case of error
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r) // re-throw panic after rollback
+		} else if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// create new order
 	order := &types.Order{
 		Symbol:    orderBody.Symbol,
 		Side:      orderBody.Side,
@@ -59,22 +72,36 @@ func (h *OrderHandler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 		Status:    types.OPEN,
 	}
 
-	orderId, err := h.Storage.PlaceOrder(*order)
+	orderID, err := h.Storage.PlaceOrder(tx, *order)
 	if err != nil {
-		slog.Error("Failed to place order in database", slog.String("error", err.Error()))
+		slog.Error("Failed to place order in database", "error", err)
 		response.WriteJson(w, http.StatusInternalServerError, response.GeneralErrorString("failed to place order"))
 		return
 	}
 
-	order.OrderID = orderId
-	slog.Info("Processing order", slog.Int64("order_id", orderId))
-	trades := h.processOrder(order)
+	order.OrderID = orderID
+	slog.Info("Processing order", "order_id", orderID)
+
+	// process order for matching
+	trades, err := h.processOrder(tx, order)
+	if err != nil {
+		slog.Error("Failed to process order", "error", err)
+		response.WriteJson(w, http.StatusInternalServerError, response.GeneralErrorString("failed to process order"))
+		return
+	}
+
+	// commit the transaction if everything succeeded
+	if err = tx.Commit(); err != nil {
+		slog.Error("Failed to commit transaction", "error", err)
+		response.WriteJson(w, http.StatusInternalServerError, response.GeneralErrorString("failed to complete order processing"))
+		return
+	}
 
 	response.WriteJson(w, http.StatusOK, map[string]any{
 		"message": "order placed successfully",
 		"data": map[string]any{
-			"order_id": orderId,
-			"status":   string(order.Status),
+			"order_id": orderID,
+			"status":   order.Status,
 			"trades":   trades,
 		},
 	})
@@ -106,18 +133,39 @@ func (h *OrderHandler) GetOrderStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("orderId")
-	orderID, err := strconv.ParseInt(id, 10, 64)
-	if err != nil || orderID <= 0 {
-		response.WriteJson(w, http.StatusBadRequest, response.GeneralErrorString("invalid order id"))
+	if r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	slog.Info("Cancelling order", slog.Int64("order_id", orderID))
+	id := r.PathValue("orderId")
+	orderID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		response.WriteJson(w, http.StatusBadRequest, response.GeneralError(fmt.Errorf("invalid order id")))
+		return
+	}
+
+	slog.Info("Cancelling order", "order_id", orderID)
+
+	tx, err := h.Storage.Begin()
+	if err != nil {
+		slog.Error("Failed to begin transaction", "error", err)
+		response.WriteJson(w, http.StatusInternalServerError, response.GeneralErrorString("failed to start transaction"))
+		return
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r)
+		} else if err != nil {
+			tx.Rollback()
+		}
+	}()
 
 	order, err := h.Storage.GetOrderStatus(orderID)
 	if err != nil {
-		slog.Error("Failed to fetch order for cancellation", slog.String("error", err.Error()))
+		slog.Error("Failed to fetch order", "error", err)
 		response.WriteJson(w, http.StatusNotFound, response.GeneralErrorString("order not found"))
 		return
 	}
@@ -129,35 +177,33 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	case types.CANCELLED:
 		response.WriteJson(w, http.StatusBadRequest, response.GeneralErrorString("order is already cancelled"))
 		return
-	}
-
-	if order.Status == types.OPEN || order.Status == types.PARTIAL {
-		h.mu.Lock()
-		if book, exists := h.OrderBooks[order.Symbol]; exists {
-			if !book.RemoveOrder(orderID) {
-				slog.Warn("Order not found in order book", slog.Int64("order_id", orderID))
-			}
-		} else {
-			slog.Warn("Order book not found for", slog.String("symbol", order.Symbol))
-		}
-		h.mu.Unlock()
-	}
-
-	err = h.Storage.MarkOrderCancelled(orderID)
-	if err != nil {
-		slog.Error("Failed to cancel order in database", slog.String("error", err.Error()))
-		response.WriteJson(w, http.StatusInternalServerError,
-			response.GeneralErrorString("failed to cancel order"))
+	case types.OPEN, types.PARTIAL:
+		// proceed with cancellation
+	default:
+		response.WriteJson(w, http.StatusBadRequest, response.GeneralErrorString("invalid order status"))
 		return
 	}
 
-	slog.Info("Order cancelled successfully", slog.Int64("order_id", orderID))
+	err = h.Storage.MarkOrderCancelled(tx, orderID)
+	if err != nil {
+		slog.Error("Failed to cancel order", "error", err)
+		response.WriteJson(w, http.StatusInternalServerError, response.GeneralErrorString("failed to cancel order"))
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		slog.Error("Failed to commit transaction", "error", err)
+		response.WriteJson(w, http.StatusInternalServerError, response.GeneralErrorString("failed to complete cancellation"))
+		return
+	}
+
+	slog.Info("Order cancelled successfully", "order_id", orderID)
 
 	response.WriteJson(w, http.StatusOK, map[string]any{
 		"message": "order cancelled successfully",
 		"data": map[string]any{
 			"order_id": orderID,
-			"status":   types.CANCELLED,
+			"status":   "cancelled",
 		},
 	})
 }
@@ -169,9 +215,12 @@ func (h *OrderHandler) GetOrderBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.RLock()
-	book, exists := h.OrderBooks[symbol]
-	h.mu.RUnlock()
+	orders, err := h.Storage.GetMatchingOrders(symbol, nil)
+	if err != nil {
+		slog.Error("failed to get orders from database", "error", err)
+		response.WriteJson(w, http.StatusInternalServerError, response.GeneralErrorString("failed to get order book"))
+		return
+	}
 
 	snapshot := types.OrderBookSnapshot{
 		Symbol: symbol,
@@ -179,25 +228,28 @@ func (h *OrderHandler) GetOrderBook(w http.ResponseWriter, r *http.Request) {
 		Asks:   []types.OrderBookEntry{},
 	}
 
-	if !exists {
-		response.WriteJson(w, http.StatusOK, map[string]any{
-			"message": "order book is empty",
-			"data":    snapshot,
-		})
-		return
-	}
-
-	book.mu.RLock()
-	defer book.mu.RUnlock()
-
-	// Process bids
 	bidLevels := make(map[int64]int64)
-	for _, bid := range book.Bids {
-		if bid.Price != nil {
-			bidLevels[*bid.Price] += bid.Quantity
+	askLevels := make(map[int64]int64)
+
+	for _, order := range orders {
+		if order.Symbol != symbol || order.Status == types.CANCELLED {
+			continue
+		}
+
+		if order.Price == nil {
+			// skip market orders as they don't have a price
+			continue
+		}
+
+		switch order.Side {
+		case types.BUY:
+			bidLevels[*order.Price] += order.Remaining
+		case types.SELL:
+			askLevels[*order.Price] += order.Remaining
 		}
 	}
 
+	// convert bid levels to order book entries
 	for price, quantity := range bidLevels {
 		snapshot.Bids = append(snapshot.Bids, types.OrderBookEntry{
 			Price:    price,
@@ -205,14 +257,7 @@ func (h *OrderHandler) GetOrderBook(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Process asks
-	askLevels := make(map[int64]int64)
-	for _, ask := range book.Asks {
-		if ask.Price != nil {
-			askLevels[*ask.Price] += ask.Quantity
-		}
-	}
-
+	// convert ask levels to order book entries
 	for price, quantity := range askLevels {
 		snapshot.Asks = append(snapshot.Asks, types.OrderBookEntry{
 			Price:    price,
@@ -220,12 +265,12 @@ func (h *OrderHandler) GetOrderBook(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Sort bids, highest bid first
+	// sort bids, highest bid first
 	sort.Slice(snapshot.Bids, func(i, j int) bool {
 		return snapshot.Bids[i].Price > snapshot.Bids[j].Price
 	})
 
-	// Sort asks, lowest ask first
+	// sort asks, lowest ask first
 	sort.Slice(snapshot.Asks, func(i, j int) bool {
 		return snapshot.Asks[i].Price < snapshot.Asks[j].Price
 	})
@@ -233,5 +278,19 @@ func (h *OrderHandler) GetOrderBook(w http.ResponseWriter, r *http.Request) {
 	response.WriteJson(w, http.StatusOK, map[string]any{
 		"message": "order book retrieved successfully",
 		"data":    snapshot,
+	})
+}
+
+func (h *OrderHandler) GetAllOrders(w http.ResponseWriter, r *http.Request) {
+	orders, err := h.Storage.GetAllOrders()
+	if err != nil {
+		slog.Error("failed to get orders from database", "error", err)
+		response.WriteJson(w, http.StatusInternalServerError, response.GeneralErrorString("failed to get orders"))
+		return
+	}
+
+	response.WriteJson(w, http.StatusOK, map[string]any{
+		"message": "orders retrieved successfully",
+		"data":    orders,
 	})
 }

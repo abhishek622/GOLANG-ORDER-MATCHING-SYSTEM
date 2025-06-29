@@ -32,7 +32,9 @@ func main() {
 	router := http.NewServeMux()
 	orderHandler := order.NewOrderHandler(storage)
 
+	// Order endpoints
 	router.HandleFunc("POST /api/orders", orderHandler.PlaceOrder)
+	router.HandleFunc("GET /api/orders", orderHandler.GetAllOrders)
 	router.HandleFunc("GET /api/orders/{orderId}", orderHandler.GetOrderStatus)
 	router.HandleFunc("DELETE /api/orders/{orderId}", orderHandler.CancelOrder)
 	router.HandleFunc("GET /api/orderbook", orderHandler.GetOrderBook)
@@ -48,7 +50,7 @@ func main() {
 
 	slog.Info("Server started ", slog.String("address", cfg.Addr))
 
-	// Graceful shutdown of server
+	// graceful shutdown of server
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -64,12 +66,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Shutdown server
+	// shutdown server
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("Failed to shutdown server", slog.String("error", err.Error()))
 	}
 
-	// Close database connection
+	// close database connection
 	if err := storage.DB.Close(); err != nil {
 		slog.Error("Failed to close database connection", slog.String("error", err.Error()))
 	}
