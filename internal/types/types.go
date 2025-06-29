@@ -6,6 +6,7 @@ type OrderSide string
 type OrderType string
 type OrderStatus string
 
+// Order Types: Support both Limit Orders and Market Orders for Buy and Sell sides.
 const (
 	BUY  OrderSide = "buy"
 	SELL OrderSide = "sell"
